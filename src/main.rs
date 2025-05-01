@@ -11,11 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{
-    io,
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use std::{io, thread, time::Duration, time::Instant};
 
 enum Direction {
     Left,
@@ -26,8 +22,14 @@ struct Fish {
     x: u16,
     y: u16,
     body: String,
+    color: Color,
     speed: u16,
     direction: Direction,
+}
+
+struct Bubble {
+    x: u16,
+    y: u16,
 }
 
 impl Fish {
@@ -50,11 +52,22 @@ impl Fish {
             Direction::Left => max_x,
         };
 
+        let color = *[
+            Color::Cyan,
+            Color::LightMagenta,
+            Color::Yellow,
+            Color::LightBlue,
+            Color::Green,
+        ]
+        .choose(rng)
+        .unwrap();
+
         Self {
             x,
             y: rng.random_range(1..max_y),
             body,
-            speed: rng.random_range(1..4),
+            color,
+            speed: rng.random_range(1..3),
             direction,
         }
     }
@@ -112,11 +125,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let frame_duration = Duration::from_millis(60);
     let mut last_frame = Instant::now();
 
+    let mut bubbles: Vec<Bubble> = (0..20)
+        .map(|_| Bubble {
+            x: rng.random_range(1..cols - 1),
+            y: rng.random_range(1..rows - 1),
+        })
+        .collect();
+
     loop {
-        // Rendu
         terminal.draw(|f| {
             let area = f.area();
-
             let block = Block::default()
                 .title("Aquatui")
                 .borders(Borders::ALL)
@@ -124,6 +142,20 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             f.render_widget(&block, area);
 
             let inner = block.inner(area);
+            let mut lines = vec![Line::from(""); inner.height as usize];
+
+            // Fond océan dégradé
+            for i in 0..lines.len() {
+                let shade = match i {
+                    0..=3 => Color::Blue,
+                    4..=6 => Color::Rgb(0, 0, 139),
+                    _ => Color::Black,
+                };
+                lines[i] = Line::from(Span::styled(
+                    " ".repeat(inner.width as usize),
+                    Style::default().bg(shade),
+                ));
+            }
 
             let mut lines: Vec<Line> = vec![Line::from(""); inner.height as usize];
 
@@ -136,7 +168,24 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     line.push_str(&" ".repeat(display_x as usize));
                     line.push_str(&fish.body);
                     lines[fish.y as usize] =
-                        Line::from(Span::styled(line, Style::default().fg(Color::Cyan)));
+                        Line::from(Span::styled(line, Style::default().fg(fish.color)));
+                }
+            }
+
+            // Bulles
+            for bubble in &bubbles {
+                if (bubble.y as usize) < lines.len() {
+                    let x = bubble.x.min(inner.width - 1) as usize;
+                    if x < inner.width as usize {
+                        let mut content = lines[bubble.y as usize].clone();
+                        let bubble_span = Span::styled("o", Style::default().fg(Color::White));
+                        if x < content.spans.len() {
+                            content.spans[x] = bubble_span;
+                        } else {
+                            content.spans.push(bubble_span);
+                        }
+                        lines[bubble.y as usize] = content;
+                    }
                 }
             }
 
@@ -144,10 +193,20 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             f.render_widget(paragraph, inner);
         })?;
 
-        // Mouvement selon le timer
         if last_frame.elapsed() >= frame_duration {
+            // Mise à jour des poissons
             for fish in &mut fishes {
                 fish.update(cols - 2);
+            }
+
+            // Mise à jour des bulles
+            for bubble in &mut bubbles {
+                if bubble.y > 0 {
+                    bubble.y -= 1;
+                } else {
+                    bubble.y = rows - 2;
+                    bubble.x = rng.random_range(1..cols - 1);
+                }
             }
             last_frame = Instant::now();
         }
@@ -162,7 +221,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
         }
 
         // Pause très courte pour éviter 100% CPU
-        sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(20));
     }
 
     Ok(())
