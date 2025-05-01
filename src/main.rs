@@ -3,7 +3,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use rand::Rng;
+use rand::{Rng, prelude::IndexedRandom, rngs::ThreadRng};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -11,7 +11,11 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{io, thread, time::Duration};
+use std::{
+    io,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 enum Direction {
     Left,
@@ -27,17 +31,19 @@ struct Fish {
 }
 
 impl Fish {
-    fn new(max_x: u16, max_y: u16) -> Self {
-        let mut rng = rand::rng();
+    fn new(max_x: u16, max_y: u16, rng: &mut ThreadRng) -> Self {
         let direction = if rng.random_bool(0.5) {
             Direction::Right
         } else {
             Direction::Left
         };
-        let body = match direction {
-            Direction::Right => "><((°>".to_string(),
-            Direction::Left => "<°))><".to_string(),
+
+        let bodies = match direction {
+            Direction::Right => vec!["><((°>", "><>", ">º)))>", "⩿⩾⩽⩾"],
+            Direction::Left => vec!["<°))><", "<><", "<(((º<", "⩾⩽⩾⩿"],
         };
+
+        let body = bodies.choose(rng).unwrap().to_string();
 
         let x = match direction {
             Direction::Right => 0,
@@ -97,12 +103,17 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
 
-    let num_fish = 5;
+    let mut rng = rand::rng();
+    let num_fish = 15;
     let mut fishes: Vec<Fish> = (0..num_fish)
-        .map(|_| Fish::new(cols - 2, rows - 2))
+        .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
 
+    let frame_duration = Duration::from_millis(60);
+    let mut last_frame = Instant::now();
+
     loop {
+        // Rendu
         terminal.draw(|f| {
             let area = f.area();
 
@@ -133,11 +144,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             f.render_widget(paragraph, inner);
         })?;
 
-        for fish in &mut fishes {
-            fish.update(cols - 2);
+        // Mouvement selon le timer
+        if last_frame.elapsed() >= frame_duration {
+            for fish in &mut fishes {
+                fish.update(cols - 2);
+            }
+            last_frame = Instant::now();
         }
 
-        if poll(Duration::from_millis(10))? {
+        // Gestion de la touche 'q'
+        if poll(Duration::from_millis(1))? {
             if let Event::Key(key) = read()? {
                 if key.code == KeyCode::Char('q') {
                     break;
@@ -145,7 +161,8 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             }
         }
 
-        thread::sleep(Duration::from_millis(100));
+        // Pause très courte pour éviter 100% CPU
+        sleep(Duration::from_millis(5));
     }
 
     Ok(())
