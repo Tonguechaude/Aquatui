@@ -21,7 +21,7 @@ enum Direction {
 struct Fish {
     x: u16,
     y: u16,
-    body: String,
+    body: Vec<String>, // Chaque poisson est maintenant composé de plusieurs lignes
     color: Color,
     speed: u16,
     direction: Direction,
@@ -43,31 +43,32 @@ impl Fish {
 
         let bodies = match direction {
             Direction::Right => vec![
-                "><((°>",
-                "><>",
-                ">º)))>",
-                "⩿⩾⩽⩾",
-                r#"
-                \\
-               / \\
-             >=_('>
-               \\_/
-                /"#,
+                "><((°>".to_string(),
+                "><>".to_string(),
+                ">º)))>".to_string(),
+                "⩿⩾⩽⩾".to_string(),
+                r#"\\
+                  / \\
+                 >=_('>
+                  \\_/
+                    /"#
+                .to_string(),
             ],
             Direction::Left => vec![
-                "<°))><",
-                "<><",
-                "<(((º<",
-                "⩾⩽⩾⩿",
+                "<°))><".to_string(),
+                "<><".to_string(),
+                "<(((º<".to_string(),
+                "⩾⩾⩾⩿".to_string(),
                 r#" /
                    / \\
                   <')_=<
                    \\_/
-                    \\"#,
+                    \\"#
+                .to_string(),
             ],
         };
 
-        let body = bodies.choose(rng).unwrap().to_string();
+        let body = bodies;
 
         let x = match direction {
             Direction::Right => 0,
@@ -176,18 +177,19 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                 ));
             }
 
-            let mut lines: Vec<Line> = vec![Line::from(""); inner.height as usize];
-
+            // Affichage des poissons (multi-lignes)
             for fish in &fishes {
-                if (fish.y as usize) < lines.len() {
-                    let mut line = String::new();
-                    let display_x = fish
-                        .x
-                        .min(inner.width.saturating_sub(fish.body.len() as u16));
-                    line.push_str(&" ".repeat(display_x as usize));
-                    line.push_str(&fish.body);
-                    lines[fish.y as usize] =
-                        Line::from(Span::styled(line, Style::default().fg(fish.color)));
+                for (i, body_line) in fish.body.iter().enumerate() {
+                    if (fish.y as usize + i) < lines.len() {
+                        let mut line = String::new();
+                        let display_x = fish
+                            .x
+                            .min(inner.width.saturating_sub(body_line.len() as u16));
+                        line.push_str(&" ".repeat(display_x as usize));
+                        line.push_str(body_line);
+                        lines[fish.y as usize + i] =
+                            Line::from(Span::styled(line, Style::default().fg(fish.color)));
+                    }
                 }
             }
 
