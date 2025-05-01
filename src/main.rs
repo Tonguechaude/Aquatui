@@ -13,18 +13,26 @@ use ratatui::{
 };
 use std::{io, thread, time::Duration, time::Instant};
 
+#[derive(Clone, PartialEq)]
 enum Direction {
     Left,
     Right,
 }
 
+#[derive(Clone)]
 struct Fish {
     x: u16,
     y: u16,
-    body: Vec<String>, // Chaque poisson est maintenant composé de plusieurs lignes
+    body: Vec<String>,
     color: Color,
     speed: u16,
     direction: Direction,
+}
+
+impl PartialEq for Fish {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
 }
 
 struct Bubble {
@@ -41,17 +49,18 @@ impl Fish {
             Direction::Left
         };
 
-        let bodies = match direction {
+        let raw_bodies = match direction {
             Direction::Right => vec![
                 "><((°>".to_string(),
                 "><>".to_string(),
                 ">º)))>".to_string(),
                 "⩿⩾⩽⩾".to_string(),
-                r#"\\
-                  / \\
-                 >=_('>
-                  \\_/
-                    /"#
+                r#"
+                    \\
+                   / \\
+                  >=_('>
+                   \\_/
+                     /"#
                 .to_string(),
             ],
             Direction::Left => vec![
@@ -59,7 +68,8 @@ impl Fish {
                 "<><".to_string(),
                 "<(((º<".to_string(),
                 "⩾⩾⩾⩿".to_string(),
-                r#" /
+                r#"
+                    /
                    / \\
                   <')_=<
                    \\_/
@@ -68,7 +78,8 @@ impl Fish {
             ],
         };
 
-        let body = bodies;
+        let raw_body = raw_bodies.choose(rng).unwrap();
+        let body = raw_body.lines().map(|l| l.trim_end().to_string()).collect();
 
         let x = match direction {
             Direction::Right => 0,
@@ -95,7 +106,7 @@ impl Fish {
         }
     }
 
-    fn update(&mut self, max_x: u16) {
+    fn update(&mut self, max_x: u16, fishes: &mut [&mut Fish]) {
         match self.direction {
             Direction::Right => {
                 self.x += self.speed;
@@ -108,6 +119,17 @@ impl Fish {
                     self.x = max_x;
                 } else {
                     self.x -= self.speed;
+                }
+            }
+        }
+
+        // Collisions
+        for other_fish in fishes.iter_mut() {
+            if self != *other_fish {
+                if self.direction == Direction::Right && other_fish.direction == Direction::Left {
+                    if self.x == other_fish.x && self.y == other_fish.y {
+                        other_fish.x = max_x;
+                    }
                 }
             }
         }
@@ -144,7 +166,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let frame_duration = Duration::from_millis(60);
     let mut last_frame = Instant::now();
 
-    let num_fish = 15;
+    let num_fish = 10;
     let mut fishes: Vec<Fish> = (0..num_fish)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
@@ -164,31 +186,23 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             let inner = block.inner(area);
             let mut lines = vec![Line::from(""); inner.height as usize];
 
-            // Fond océan dégradé
-            for i in 0..lines.len() {
-                let shade = match i {
-                    0..=3 => Color::Blue,
-                    4..=6 => Color::Rgb(0, 0, 139),
-                    _ => Color::Black,
-                };
-                lines[i] = Line::from(Span::styled(
-                    " ".repeat(inner.width as usize),
-                    Style::default().bg(shade),
-                ));
-            }
-
             // Affichage des poissons (multi-lignes)
             for fish in &fishes {
+                let max_body_width = fish.body.iter().map(|line| line.len()).max().unwrap_or(0);
+                let display_x = fish
+                    .x
+                    .min(inner.width.saturating_sub(max_body_width as u16));
                 for (i, body_line) in fish.body.iter().enumerate() {
                     if (fish.y as usize + i) < lines.len() {
-                        let mut line = String::new();
-                        let display_x = fish
-                            .x
-                            .min(inner.width.saturating_sub(body_line.len() as u16));
-                        line.push_str(&" ".repeat(display_x as usize));
-                        line.push_str(body_line);
-                        lines[fish.y as usize + i] =
-                            Line::from(Span::styled(line, Style::default().fg(fish.color)));
+                        let mut content = lines[fish.y as usize + i].clone();
+                        while content.spans.len() < display_x as usize {
+                            content.spans.push(Span::raw(" "));
+                        }
+                        content.spans.push(Span::styled(
+                            body_line.clone(),
+                            Style::default().fg(fish.color),
+                        ));
+                        lines[fish.y as usize + i] = content;
                     }
                 }
             }
@@ -201,11 +215,10 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     let bubble_span = Span::styled(symbol, Style::default().fg(Color::White));
 
                     let mut content = lines[bubble.y as usize].clone();
-                    if x < content.spans.len() {
-                        content.spans[x] = bubble_span;
-                    } else {
-                        content.spans.push(bubble_span);
+                    while content.spans.len() <= x {
+                        content.spans.push(Span::raw(" "));
                     }
+                    content.spans[x] = bubble_span;
                     lines[bubble.y as usize] = content;
                 }
             }
@@ -216,10 +229,13 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
         if last_frame.elapsed() >= frame_duration {
             // Mise à jour des poissons
-            for fish in &mut fishes {
-                fish.update(cols - 2);
+            for i in 0..fishes.len() {
+                let (left, right) = fishes.split_at_mut(i);
+                let (fish, right) = right.split_at_mut(1);
+                let fish = &mut fish[0];
+                let mut others: Vec<&mut Fish> = left.iter_mut().chain(right.iter_mut()).collect();
+                fish.update(cols - 2, &mut others);
             }
-
             // Mise à jour des bulles
             for bubble in &mut bubbles {
                 bubble.update(rows - 2, cols - 1, &mut rng);
