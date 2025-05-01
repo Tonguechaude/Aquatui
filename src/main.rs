@@ -3,7 +3,10 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use rand::{Rng, prelude::IndexedRandom, rngs::ThreadRng};
+use rand::{
+    Rng, distr::Distribution, distr::weighted::WeightedIndex, prelude::IndexedRandom,
+    rngs::ThreadRng,
+};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -43,11 +46,11 @@ struct Bubble {
 }
 
 const KAME_HOUSE: &str = r#"
-        ____KAME____
-       /   HOUSE    \
-      /______________\
-      | []   __   [] |
-      |____|_____|___|
+  ____KAME____
+ /   HOUSE    \
+/______________\
+| []   __   [] |
+|____|_____|___|
 "#;
 
 impl Fish {
@@ -57,58 +60,69 @@ impl Fish {
         } else {
             Direction::Left
         };
-
+        let x = match direction {
+            Direction::Right => 0,
+            Direction::Left => max_x,
+        };
         let raw_bodies = match direction {
             Direction::Right => vec![
-                "><((°>".to_string(),
-                "><>".to_string(),
-                ">º)))>".to_string(),
-                "⩿⩾⩽⩾".to_string(),
-                r#"
+                ("><((°>".to_string(), 3),
+                ("><>".to_string(), 3),
+                (">º)))>".to_string(), 3),
+                (
+                    r#"
                     \\
                    / \\
                   >=_('>
                    \\_/
                      /"#
-                .to_string(),
-                r#"
+                    .to_string(),
+                    1,
+                ),
+                (
+                    r#"
                 ,--,_
          __    _\\.---'-.
          \\ '.-"     // o\\
          /_.'-._    \\\\  /
                 `"--(/"#
-                    .to_string(),
+                        .to_string(),
+                    1,
+                ),
             ],
             Direction::Left => vec![
-                "<°))><".to_string(),
-                "<><".to_string(),
-                "<(((º<".to_string(),
-                "⩾⩾⩾⩿".to_string(),
-                r#"
+                ("<°))><".to_string(), 3),
+                ("<><".to_string(), 3),
+                ("<(((º<".to_string(), 3),
+                (
+                    r#"
                     /
                    / \\
                   <')_=<
                    \\_/
                     \\"#
-                .to_string(),
-                r#"
+                    .to_string(),
+                    2,
+                ),
+                (
+                    r#"
                 _,--,
              .-'---./_    __
             /o \\\\     "-.' /
             \\  //    _.-'._\\
              `"\\)--"#
-                    .to_string(),
+                        .to_string(),
+                    1,
+                ),
             ],
         };
 
-        let raw_body = raw_bodies.choose(rng).unwrap();
+        let speed = rng.random_range(1..3);
+        let weights: Vec<u32> = raw_bodies.iter().map(|(_, weight)| *weight).collect();
+        let dist = WeightedIndex::new(&weights).unwrap();
+        let choice = dist.sample(rng);
+        let (raw_body, _) = &raw_bodies[choice];
         let body = raw_body.lines().map(|l| l.trim_end().to_string()).collect();
-
-        let x = match direction {
-            Direction::Right => 0,
-            Direction::Left => max_x,
-        };
-
         let color = *[
             Color::Cyan,
             Color::LightMagenta,
@@ -124,7 +138,7 @@ impl Fish {
             y: rng.random_range(2..max_y.saturating_sub(4)),
             body,
             color,
-            speed: rng.random_range(1..3),
+            speed,
             direction,
         }
     }
@@ -133,7 +147,10 @@ impl Fish {
         match self.direction {
             Direction::Right => {
                 self.x += self.speed;
-                self.x < max_x
+                match self.direction {
+                    Direction::Right => self.x < max_x + 10,
+                    Direction::Left => self.x > 0u16.saturating_sub(10),
+                }
             }
             Direction::Left => {
                 if self.x <= self.speed {
@@ -212,11 +229,11 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let frame_duration = Duration::from_millis(100);
     let mut last_frame = Instant::now();
 
-    let num_fish = 15;
+    let num_fish = 10;
     let mut fishes: Vec<Fish> = (0..num_fish)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
-    let mut bubbles: Vec<Bubble> = (0..20)
+    let mut bubbles: Vec<Bubble> = (0..40)
         .map(|_| {
             Bubble::new(
                 rng.random_range(1..cols - 1),
@@ -241,11 +258,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
             // Affichage des poissons (multi-lignes)
             for fish in &fishes {
-                let max_body_width = fish.body.iter().map(|line| line.len()).max().unwrap_or(0);
-                let display_x = fish
-                    .x
-                    .min(inner.width.saturating_sub(max_body_width as u16));
-
                 for (dy, line) in fish.body.iter().enumerate() {
                     let y = fish.y as usize + dy;
                     if y >= lines.len() {
@@ -253,14 +265,13 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     }
 
                     let chars: Vec<_> = line.chars().collect();
-                    for (dx, ch) in chars.into_iter().enumerate() {
-                        let x = display_x as usize + dx;
-                        if x >= inner.width as usize {
-                            break;
+                    let start_x = fish.x as i16;
+                    for (i, ch) in chars.into_iter().enumerate() {
+                        let screen_x = start_x + i as i16;
+                        if screen_x >= 0 && (screen_x as u16) < inner.width {
+                            lines[y].spans[screen_x as usize] =
+                                Span::styled(ch.to_string(), Style::default().fg(fish.color));
                         }
-
-                        lines[y].spans[x] =
-                            Span::styled(ch.to_string(), Style::default().fg(fish.color));
                     }
                 }
             }
