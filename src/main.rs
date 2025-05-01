@@ -7,33 +7,67 @@ use rand::Rng;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 use std::{io, thread, time::Duration};
 
+enum Direction {
+    Left,
+    Right,
+}
+
 struct Fish {
     x: u16,
     y: u16,
     body: String,
+    speed: u16,
+    direction: Direction,
 }
 
 impl Fish {
-    fn new(_max_x: u16, max_y: u16) -> Self {
+    fn new(max_x: u16, max_y: u16) -> Self {
         let mut rng = rand::rng();
+        let direction = if rng.random_bool(0.5) {
+            Direction::Right
+        } else {
+            Direction::Left
+        };
+        let body = match direction {
+            Direction::Right => "><((°>".to_string(),
+            Direction::Left => "<°))><".to_string(),
+        };
+
+        let x = match direction {
+            Direction::Right => 0,
+            Direction::Left => max_x,
+        };
+
         Self {
-            x: 0,
+            x,
             y: rng.random_range(1..max_y),
-            body: String::from("><((°>"),
+            body,
+            speed: rng.random_range(1..4),
+            direction,
         }
     }
 
     fn update(&mut self, max_x: u16) {
-        self.x += 1;
-        if self.x > max_x {
-            self.x = 0;
+        match self.direction {
+            Direction::Right => {
+                self.x += self.speed;
+                if self.x > max_x {
+                    self.x = 0;
+                }
+            }
+            Direction::Left => {
+                if self.x < self.speed {
+                    self.x = max_x;
+                } else {
+                    self.x -= self.speed;
+                }
+            }
         }
     }
 }
@@ -62,7 +96,11 @@ fn main() -> Result<(), io::Error> {
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
-    let mut fish = Fish::new(cols, rows - 2); // -2 pour éviter bordures
+
+    let num_fish = 5;
+    let mut fishes: Vec<Fish> = (0..num_fish)
+        .map(|_| Fish::new(cols - 2, rows - 2))
+        .collect();
 
     loop {
         terminal.draw(|f| {
@@ -76,29 +114,28 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
             let inner = block.inner(area);
 
-            if fish.y < inner.height {
-                let mut lines: Vec<Line> = vec![];
+            let mut lines: Vec<Line> = vec![Line::from(""); inner.height as usize];
 
-                for i in 0..inner.height {
-                    if i == fish.y {
-                        let mut line = String::new();
-                        line.push_str(&" ".repeat(fish.x as usize));
-                        line.push_str(&fish.body);
-                        lines.push(Line::from(Span::styled(
-                            line,
-                            Style::default().fg(Color::Cyan),
-                        )));
-                    } else {
-                        lines.push(Line::from(""));
-                    }
+            for fish in &fishes {
+                if (fish.y as usize) < lines.len() {
+                    let mut line = String::new();
+                    let display_x = fish
+                        .x
+                        .min(inner.width.saturating_sub(fish.body.len() as u16));
+                    line.push_str(&" ".repeat(display_x as usize));
+                    line.push_str(&fish.body);
+                    lines[fish.y as usize] =
+                        Line::from(Span::styled(line, Style::default().fg(Color::Cyan)));
                 }
-
-                let paragraph = Paragraph::new(lines);
-                f.render_widget(paragraph, inner);
             }
+
+            let paragraph = Paragraph::new(lines);
+            f.render_widget(paragraph, inner);
         })?;
 
-        fish.update(cols - 2);
+        for fish in &mut fishes {
+            fish.update(cols - 2);
+        }
 
         if poll(Duration::from_millis(10))? {
             if let Event::Key(key) = read()? {
