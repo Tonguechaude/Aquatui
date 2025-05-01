@@ -39,7 +39,16 @@ struct Bubble {
     x: u16,
     y: u16,
     frame: usize, // pour alterner entre ".", "o", "0"
+    z_index: u8,
 }
+
+const KAME_HOUSE: &str = r#"
+        ____KAME____
+       /   HOUSE    \
+      /______________\
+      | []   __   [] |
+      |____|_____|___|
+"#;
 
 impl Fish {
     fn new(max_x: u16, max_y: u16, rng: &mut ThreadRng) -> Self {
@@ -98,7 +107,7 @@ impl Fish {
 
         Self {
             x,
-            y: rng.random_range(1..max_y),
+            y: rng.random_range(2..max_y.saturating_sub(4)),
             body,
             color,
             speed: rng.random_range(1..3),
@@ -106,19 +115,18 @@ impl Fish {
         }
     }
 
-    fn update(&mut self, max_x: u16) {
+    fn update(&mut self, max_x: u16) -> bool {
         match self.direction {
             Direction::Right => {
                 self.x += self.speed;
-                if self.x > max_x {
-                    self.x = 0;
-                }
+                self.x < max_x
             }
             Direction::Left => {
-                if self.x < self.speed {
-                    self.x = max_x;
+                if self.x <= self.speed {
+                    false
                 } else {
                     self.x -= self.speed;
+                    true
                 }
             }
         }
@@ -128,8 +136,13 @@ impl Fish {
 impl Bubble {
     const FRAMES: [&'static str; 3] = [".", "o", "0"];
 
-    fn new(x: u16, y: u16) -> Self {
-        Self { x, y, frame: 0 }
+    fn new(x: u16, y: u16, z_index: u8) -> Self {
+        Self {
+            x,
+            y,
+            frame: 0,
+            z_index,
+        }
     }
 
     fn update(&mut self, max_y: u16, max_x: u16, rng: &mut ThreadRng) {
@@ -148,6 +161,36 @@ impl Bubble {
     }
 }
 
+fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16) {
+    let seaweed_height = 4;
+    let seaweed_chars = ["~", "≡", "≡", "~", "≡"];
+    for i in 0..seaweed_height {
+        let y = rows - 1 - i;
+        if y as usize >= lines.len() {
+            continue;
+        }
+
+        let seaweed_line = seaweed_chars
+            .iter()
+            .map(|&s| s) // Dé-référencement ici
+            .cycle()
+            .take(cols as usize)
+            .collect::<String>();
+
+        let mut content = lines[y as usize].clone();
+        for (dx, ch) in seaweed_line.chars().enumerate() {
+            if dx >= cols as usize {
+                break;
+            }
+            if dx < content.spans.len() {
+                content.spans[dx] = Span::styled(ch.to_string(), Style::default().fg(Color::Green));
+            }
+        }
+
+        lines[y as usize] = content;
+    }
+}
+
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
@@ -155,12 +198,18 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let frame_duration = Duration::from_millis(100);
     let mut last_frame = Instant::now();
 
-    let num_fish = 5;
+    let num_fish = 15;
     let mut fishes: Vec<Fish> = (0..num_fish)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
     let mut bubbles: Vec<Bubble> = (0..20)
-        .map(|_| Bubble::new(rng.random_range(1..cols - 1), rng.random_range(1..rows - 1)))
+        .map(|_| {
+            Bubble::new(
+                rng.random_range(1..cols - 1),
+                rng.random_range(1..rows - 1),
+                rng.random_range(0..3),
+            )
+        })
         .collect();
 
     loop {
@@ -177,7 +226,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                 vec![Line::from(vec![Span::raw(" "); inner.width as usize]); inner.height as usize];
 
             // Affichage des poissons (multi-lignes)
-
             for fish in &fishes {
                 let max_body_width = fish.body.iter().map(|line| line.len()).max().unwrap_or(0);
                 let display_x = fish
@@ -204,6 +252,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             }
 
             // Bulles
+            bubbles.sort_by_key(|b| b.z_index);
             for bubble in &bubbles {
                 if (bubble.y as usize) < lines.len() {
                     let x = bubble.x.min(inner.width - 1) as usize;
@@ -213,14 +262,52 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                 }
             }
 
+            // Algues
+            draw_seaweed(&mut lines, cols, rows);
+
+            // Kame House
+            let house_lines: Vec<&str> = KAME_HOUSE.lines().collect();
+            let house_width = house_lines.iter().map(|line| line.len()).max().unwrap_or(0);
+            let house_height = house_lines.len();
+            let start_x = cols.saturating_sub(house_width as u16 + 2) as usize;
+            let seaweed_height = 4;
+            let start_y = rows.saturating_sub(house_height as u16 + seaweed_height) as usize;
+
+            for (dy, line) in house_lines.iter().enumerate() {
+                let y = start_y + dy;
+                if y >= lines.len() {
+                    continue;
+                }
+
+                for (dx, ch) in line.chars().enumerate() {
+                    let x = start_x + dx;
+                    if x >= lines[y].spans.len() {
+                        break;
+                    }
+
+                    lines[y].spans[x] =
+                        Span::styled(ch.to_string(), Style::default().fg(Color::Magenta));
+                }
+            }
+
             let paragraph = Paragraph::new(lines);
             f.render_widget(paragraph, inner);
         })?;
 
         if last_frame.elapsed() >= frame_duration {
-            // Mise à jour des poissons
-            for fish in &mut fishes {
-                fish.update(cols - 2);
+            fishes = fishes
+                .into_iter()
+                .filter_map(|mut fish| {
+                    if fish.update(cols - 2) {
+                        Some(fish)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            while fishes.len() < num_fish {
+                fishes.push(Fish::new(cols - 2, rows - 2, &mut rng));
             }
             // Mise à jour des bulles
             for bubble in &mut bubbles {
