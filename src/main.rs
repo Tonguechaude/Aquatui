@@ -30,6 +30,7 @@ struct Fish {
 struct Bubble {
     x: u16,
     y: u16,
+    frame: usize, // pour alterner entre ".", "o", "0"
 }
 
 impl Fish {
@@ -41,8 +42,29 @@ impl Fish {
         };
 
         let bodies = match direction {
-            Direction::Right => vec!["><((°>", "><>", ">º)))>", "⩿⩾⩽⩾"],
-            Direction::Left => vec!["<°))><", "<><", "<(((º<", "⩾⩽⩾⩿"],
+            Direction::Right => vec![
+                "><((°>",
+                "><>",
+                ">º)))>",
+                "⩿⩾⩽⩾",
+                r#"
+                \\
+               / \\
+             >=_('>
+               \\_/
+                /"#,
+            ],
+            Direction::Left => vec![
+                "<°))><",
+                "<><",
+                "<(((º<",
+                "⩾⩽⩾⩿",
+                r#" /
+                   / \\
+                  <')_=<
+                   \\_/
+                    \\"#,
+            ],
         };
 
         let body = bodies.choose(rng).unwrap().to_string();
@@ -91,45 +113,42 @@ impl Fish {
     }
 }
 
-fn main() -> Result<(), io::Error> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+impl Bubble {
+    const FRAMES: [&'static str; 3] = [".", "o", "0"];
 
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    let res = run_app(&mut terminal);
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        println!("{:?}", err);
+    fn new(x: u16, y: u16) -> Self {
+        Self { x, y, frame: 0 }
     }
 
-    Ok(())
+    fn update(&mut self, max_y: u16, max_x: u16, rng: &mut ThreadRng) {
+        if self.y > 0 {
+            self.y -= 1;
+        } else {
+            self.y = max_y;
+            self.x = rng.random_range(1..max_x);
+        }
+
+        self.frame = (self.frame + 1) % Self::FRAMES.len();
+    }
+
+    fn current_symbol(&self) -> &'static str {
+        Self::FRAMES[self.frame]
+    }
 }
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
-
     let mut rng = rand::rng();
+    let frame_duration = Duration::from_millis(60);
+    let mut last_frame = Instant::now();
+
     let num_fish = 15;
     let mut fishes: Vec<Fish> = (0..num_fish)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
-
-    let frame_duration = Duration::from_millis(60);
-    let mut last_frame = Instant::now();
-
     let mut bubbles: Vec<Bubble> = (0..20)
-        .map(|_| Bubble {
-            x: rng.random_range(1..cols - 1),
-            y: rng.random_range(1..rows - 1),
-        })
+        .map(|_| Bubble::new(rng.random_range(1..cols - 1), rng.random_range(1..rows - 1)))
         .collect();
 
     loop {
@@ -176,16 +195,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             for bubble in &bubbles {
                 if (bubble.y as usize) < lines.len() {
                     let x = bubble.x.min(inner.width - 1) as usize;
-                    if x < inner.width as usize {
-                        let mut content = lines[bubble.y as usize].clone();
-                        let bubble_span = Span::styled("o", Style::default().fg(Color::White));
-                        if x < content.spans.len() {
-                            content.spans[x] = bubble_span;
-                        } else {
-                            content.spans.push(bubble_span);
-                        }
-                        lines[bubble.y as usize] = content;
+                    let symbol = bubble.current_symbol();
+                    let bubble_span = Span::styled(symbol, Style::default().fg(Color::White));
+
+                    let mut content = lines[bubble.y as usize].clone();
+                    if x < content.spans.len() {
+                        content.spans[x] = bubble_span;
+                    } else {
+                        content.spans.push(bubble_span);
                     }
+                    lines[bubble.y as usize] = content;
                 }
             }
 
@@ -201,12 +220,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
             // Mise à jour des bulles
             for bubble in &mut bubbles {
-                if bubble.y > 0 {
-                    bubble.y -= 1;
-                } else {
-                    bubble.y = rows - 2;
-                    bubble.x = rng.random_range(1..cols - 1);
-                }
+                bubble.update(rows - 2, cols - 1, &mut rng);
             }
             last_frame = Instant::now();
         }
@@ -222,6 +236,27 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
         // Pause très courte pour éviter 100% CPU
         thread::sleep(Duration::from_millis(20));
+    }
+
+    Ok(())
+}
+
+fn main() -> Result<(), io::Error> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let res = run_app(&mut terminal);
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    if let Err(err) = res {
+        println!("{:?}", err);
     }
 
     Ok(())
