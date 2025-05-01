@@ -23,6 +23,5 @@ cargo run
 Pour développer ce projet, vous pouvez utiliser les commandes suivantes :
 
 ```bash
-cargo build
-cargo test
+cargo build --release
 ```
