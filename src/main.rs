@@ -4,7 +4,9 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use rand::{
-    Rng, distr::Distribution, distr::weighted::WeightedIndex, prelude::IndexedRandom,
+    Rng,
+    distr::{Distribution, weighted::WeightedIndex},
+    prelude::IndexedRandom,
     rngs::ThreadRng,
 };
 use ratatui::{
@@ -43,6 +45,14 @@ struct Bubble {
     y: u16,
     frame: usize, // pour alterner entre ".", "o", "0"
     z_index: u8,
+}
+
+struct Seaweed {
+    x: u16,
+    y: u16,
+    frame: usize,
+    z_index: u8,
+    height: usize,
 }
 
 const KAME_HOUSE: &str = r#"
@@ -128,7 +138,6 @@ __    _\\.---'-.
             Color::LightMagenta,
             Color::Yellow,
             Color::LightBlue,
-            Color::Green,
         ]
         .choose(rng)
         .unwrap();
@@ -192,6 +201,41 @@ impl Bubble {
     }
 }
 
+impl Seaweed {
+    const FRAMES: [&'static str; 2] = [
+        "
+        (
+        )
+        (
+        )
+        (",
+        "
+        )
+        (
+        )
+        (
+        )",
+    ];
+
+    fn new(x: u16, y: u16, z_index: u8, rng: &mut ThreadRng) -> Self {
+        Self {
+            x,
+            y,
+            frame: 0,
+            z_index,
+            height: rng.random_range(2..=6),
+        }
+    }
+
+    fn update(&mut self) {
+        self.frame = (self.frame + 1) % Self::FRAMES.len();
+    }
+
+    fn current_symbol(&self) -> Vec<&str> {
+        Self::FRAMES[self.frame].lines().map(str::trim).collect()
+    }
+}
+
 fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16) {
     let seaweed_height = 4;
     let seaweed_chars = ["~", "≡", "≡", "~", "≡"];
@@ -242,7 +286,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             )
         })
         .collect();
-
+    let mut seaweeds: Vec<Seaweed> = (0..30)
+        .map(|_| {
+            Seaweed::new(
+                rng.random_range(1..cols - 1),
+                rows - 5,
+                rng.random_range(0..3),
+                &mut rng,
+            )
+        })
+        .collect();
     loop {
         terminal.draw(|f| {
             let area = f.area();
@@ -289,6 +342,27 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
             // Algues
             draw_seaweed(&mut lines, cols, rows);
+            seaweeds.sort_by_key(|s| s.z_index);
+            for seaweed in &seaweeds {
+                let x = seaweed.x.min(inner.width - 1) as usize;
+                let y = seaweed.y.min(inner.height - 1) as usize;
+                let symbol = seaweed.current_symbol();
+                let symbol_line = symbol.iter().rev().take(seaweed.height).collect::<Vec<_>>();
+                for (dy, line) in symbol_line.iter().enumerate() {
+                    let draw_y = y.saturating_sub(dy);
+                    if draw_y >= lines.len() {
+                        continue;
+                    }
+                    for (dx, char) in line.chars().enumerate() {
+                        let draw_x = x + dx;
+                        if draw_x >= lines[draw_y].spans.len() {
+                            continue;
+                        }
+                        lines[draw_y].spans[draw_x] =
+                            Span::styled(char.to_string(), Style::default().fg(Color::Green));
+                    }
+                }
+            }
 
             // Kame House
             let house_lines: Vec<&str> = KAME_HOUSE.lines().collect();
@@ -337,6 +411,10 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             // Mise à jour des bulles
             for bubble in &mut bubbles {
                 bubble.update(rows - 2, cols - 1, &mut rng);
+            }
+            // Mise à jours des algues
+            for seaweed in &mut seaweeds {
+                seaweed.update();
             }
             last_frame = Instant::now();
         }
