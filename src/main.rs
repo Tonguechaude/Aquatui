@@ -71,21 +71,21 @@ impl Fish {
                 (">º)))>".to_string(), 3),
                 (
                     r#"
-                    \\
-                   / \\
-                  >=_('>
-                   \\_/
-                     /"#
+  \\
+ / \\
+>=_('>
+ \\_/
+   /"#
                     .to_string(),
                     1,
                 ),
                 (
                     r#"
-                ,--,_
-         __    _\\.---'-.
-         \\ '.-"     // o\\
-         /_.'-._    \\\\  /
-                `"--(/"#
+        ,--,_
+__    _\\.---'-.
+\\ '.-"     // o\\
+/_.'-.-_   \\\\  /
+        `"--(/"#
                         .to_string(),
                     1,
                 ),
@@ -96,21 +96,21 @@ impl Fish {
                 ("<(((º<".to_string(), 3),
                 (
                     r#"
-                    /
-                   / \\
-                  <')_=<
-                   \\_/
-                    \\"#
+  /
+ / \\
+<')_=<
+ \\_/
+  \\"#
                     .to_string(),
                     2,
                 ),
                 (
                     r#"
-                _,--,
-             .-'---./_    __
-            /o \\\\     "-.' /
-            \\  //    _.-'._\\
-             `"\\)--"#
+    _,--,
+ .-'---./___    __
+/o \\\\     "-.' /
+\\  //    _.-'._\\
+  `"\\)--"#
                         .to_string(),
                     1,
                 ),
@@ -229,7 +229,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let frame_duration = Duration::from_millis(100);
     let mut last_frame = Instant::now();
 
-    let num_fish = 10;
+    let num_fish = 15;
     let mut fishes: Vec<Fish> = (0..num_fish)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
