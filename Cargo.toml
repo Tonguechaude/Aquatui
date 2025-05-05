@@ -7,3 +7,11 @@ edition = "2024"
 ratatui = "0.29"
 crossterm = "0.29"
 rand = "0.9.1"
+
+
+[profile.release]
+opt-level = 3     # Maximum optimization
+lto = true        # Link Time Optimization
+codegen-units = 1 # Optimize for binary size
+strip = true      # Remove debug symbols
+panic = 'abort'   # Reduce unwinding overhead
