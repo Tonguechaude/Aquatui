@@ -3,12 +3,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use rand::{
-    Rng,
-    distr::{Distribution, weighted::WeightedIndex},
-    prelude::IndexedRandom,
-    rngs::ThreadRng,
-};
+use rand::Rng;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -18,251 +13,9 @@ use ratatui::{
 };
 use std::{io, thread, time::Duration, time::Instant};
 
-const NUM_FISH: usize = 15;
-const NUM_BUBBLES: usize = 40;
-const NUM_SEAWEEDS: usize = 30;
-const FRAME_DURATION_MS: u64 = 100;
-const SLEEP_DURATION_MS: u64 = 5;
-
-#[derive(Clone)]
-enum Direction {
-    Left,
-    Right,
-}
-
-#[derive(Clone)]
-struct Fish {
-    x: u16,
-    y: u16,
-    body: Vec<String>,
-    color: Color,
-    speed: u16,
-    direction: Direction,
-}
-
-impl PartialEq for Fish {
-    fn eq(&self, other: &Self) -> bool {
-        self.x == other.x && self.y == other.y
-    }
-}
-
-struct Bubble {
-    x: u16,
-    y: u16,
-    frame: usize, // pour alterner entre ".", "o", "0"
-    z_index: u8,
-}
-
-struct Seaweed {
-    x: u16,
-    y: u16,
-    frame: usize,
-    z_index: u8,
-    height: usize,
-}
-
-const KAME_HOUSE: &str = r#"
-  ____KAME____
- /   HOUSE    \
-/______________\
-| []   __   [] |
-|____|_____|___|
-"#;
-
-impl Fish {
-    fn new(max_x: u16, max_y: u16, rng: &mut ThreadRng) -> Self {
-        let direction = if rng.random_bool(0.5) {
-            Direction::Right
-        } else {
-            Direction::Left
-        };
-        let x = match direction {
-            Direction::Right => 0,
-            Direction::Left => max_x,
-        };
-        let raw_bodies = match direction {
-            Direction::Right => vec![
-                ("><((°>".to_string(), 3),
-                ("><>".to_string(), 3),
-                (">º)))>".to_string(), 3),
-                (
-                    r#"
-  \\
- / \\
->=_('>
- \\_/
-   /"#
-                    .to_string(),
-                    1,
-                ),
-                (
-                    r#"
-        ,--,_
-__    _\\.---'-.
-\\ '.-"     // o\\
-/_.'-.-_   \\\\  /
-        `"--(/"#
-                        .to_string(),
-                    1,
-                ),
-            ],
-            Direction::Left => vec![
-                ("<°))><".to_string(), 3),
-                ("<><".to_string(), 3),
-                ("<(((º<".to_string(), 3),
-                (
-                    r#"
-  /
- / \\
-<')_=<
- \\_/
-  \\"#
-                    .to_string(),
-                    2,
-                ),
-                (
-                    r#"
-    _,--,
- .-'---./___    __
-/o \\\\     "-.' /
-\\  //    _.-'._\\
-  `"\\)--"#
-                        .to_string(),
-                    1,
-                ),
-            ],
-        };
-
-        let speed = rng.random_range(1..3);
-        let weights: Vec<u32> = raw_bodies.iter().map(|(_, weight)| *weight).collect();
-        let dist = WeightedIndex::new(&weights).unwrap();
-        let choice = dist.sample(rng);
-        let (raw_body, _) = &raw_bodies[choice];
-        let body = raw_body.lines().map(|l| l.trim_end().to_string()).collect();
-        let color = *[
-            Color::Cyan,
-            Color::LightMagenta,
-            Color::Yellow,
-            Color::LightBlue,
-        ]
-        .choose(rng)
-        .unwrap();
-
-        Self {
-            x,
-            y: rng.random_range(2..max_y.saturating_sub(4)),
-            body,
-            color,
-            speed,
-            direction,
-        }
-    }
-
-    fn update(&mut self, max_x: u16) -> bool {
-        match self.direction {
-            Direction::Right => {
-                self.x += self.speed;
-                self.x < max_x + 10
-            }
-            Direction::Left => {
-                if self.x <= self.speed {
-                    false
-                } else {
-                    self.x -= self.speed;
-                    true
-                }
-            }
-        }
-    }
-}
-
-impl Bubble {
-    const FRAMES: [&'static str; 3] = [".", "o", "0"];
-
-    fn new(x: u16, y: u16, z_index: u8) -> Self {
-        Self {
-            x,
-            y,
-            frame: 0,
-            z_index,
-        }
-    }
-
-    fn update(&mut self, max_y: u16, max_x: u16, rng: &mut ThreadRng) {
-        if self.y > 0 {
-            self.y -= 1;
-        } else {
-            self.y = max_y;
-            self.x = rng.random_range(1..max_x);
-        }
-
-        self.frame = (self.frame + 1) % Self::FRAMES.len();
-    }
-
-    fn current_symbol(&self) -> &'static str {
-        Self::FRAMES[self.frame]
-    }
-}
-
-impl Seaweed {
-    const FRAMES: [&'static str; 2] = [
-        "
-        (
-        )
-        (
-        )
-        (",
-        "
-        )
-        (
-        )
-        (
-        )",
-    ];
-
-    fn new(x: u16, y: u16, z_index: u8, rng: &mut ThreadRng) -> Self {
-        Self {
-            x,
-            y,
-            frame: 0,
-            z_index,
-            height: rng.random_range(2..=6),
-        }
-    }
-
-    fn update(&mut self) {
-        self.frame = (self.frame + 1) % Self::FRAMES.len();
-    }
-
-    fn current_symbol(&self) -> Vec<&str> {
-        Self::FRAMES[self.frame].lines().map(str::trim).collect()
-    }
-}
-
-fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16) {
-    let seaweed_height = 4;
-    let seaweed_chars = ["~", "≡", "≡", "~", "≡"];
-    for i in 0..seaweed_height {
-        let y = rows - 1 - i;
-        if y as usize >= lines.len() {
-            continue;
-        }
-
-        let seaweed_line = seaweed_chars
-            .iter()
-            .map(|&s| s) // Dé-référencement ici
-            .cycle()
-            .take(cols as usize)
-            .collect::<String>();
-
-        for (dx, ch) in seaweed_line.chars().enumerate() {
-            if dx >= cols as usize || dx >= lines[y as usize].spans.len() {
-                break;
-            }
-            lines[y as usize].spans[dx] = Span::styled(ch.to_string(), Style::default().fg(Color::Green));
-        }
-    }
-}
+use aquatui::config::*;
+use aquatui::entities::{Fish, Bubble, Seaweed};
+use aquatui::renderer::{draw_seaweed, render_fish, render_bubble, render_seaweed, render_kame_house};
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let size = terminal.size()?;
@@ -317,87 +70,22 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
             // Affichage des poissons (multi-lignes)
             for fish in &fishes {
-                for (dy, line) in fish.body.iter().enumerate() {
-                    let y = fish.y as usize + dy;
-                    if y >= lines.len() {
-                        continue;
-                    }
-
-                    let chars: Vec<_> = line.chars().collect();
-                    let start_x = fish.x as i16;
-                    for (i, ch) in chars.into_iter().enumerate() {
-                        let screen_x = start_x + i as i16;
-                        if screen_x >= 0 && (screen_x as u16) < inner.width {
-                            let x_idx = screen_x as usize;
-                            if x_idx < lines[y].spans.len() {
-                                lines[y].spans[x_idx] =
-                                    Span::styled(ch.to_string(), Style::default().fg(fish.color));
-                            }
-                        }
-                    }
-                }
+                render_fish(&mut lines, fish, inner.width);
             }
 
             // Bulles
             for bubble in &bubbles {
-                let y_idx = bubble.y as usize;
-                if y_idx < lines.len() {
-                    let x_idx = (bubble.x.min(inner.width - 1)) as usize;
-                    if x_idx < lines[y_idx].spans.len() {
-                        let symbol = bubble.current_symbol();
-                        lines[y_idx].spans[x_idx] =
-                            Span::styled(symbol, Style::default().fg(Color::Cyan));
-                    }
-                }
+                render_bubble(&mut lines, bubble, inner.width);
             }
 
             // Algues
             draw_seaweed(&mut lines, cols, rows);
             for seaweed in &seaweeds {
-                let x = seaweed.x.min(inner.width - 1) as usize;
-                let y = seaweed.y.min(inner.height - 1) as usize;
-                let symbol = seaweed.current_symbol();
-                let symbol_line = symbol.iter().rev().take(seaweed.height).collect::<Vec<_>>();
-                for (dy, line) in symbol_line.iter().enumerate() {
-                    let draw_y = y.saturating_sub(dy);
-                    if draw_y >= lines.len() {
-                        continue;
-                    }
-                    for (dx, char) in line.chars().enumerate() {
-                        let draw_x = x + dx;
-                        if draw_x >= lines[draw_y].spans.len() || draw_y >= lines.len() {
-                            continue;
-                        }
-                        lines[draw_y].spans[draw_x] =
-                            Span::styled(char.to_string(), Style::default().fg(Color::Green));
-                    }
-                }
+                render_seaweed(&mut lines, seaweed, inner.width, inner.height);
             }
 
             // Kame House
-            let house_lines: Vec<&str> = KAME_HOUSE.lines().collect();
-            let house_width = house_lines.iter().map(|line| line.len()).max().unwrap_or(0);
-            let house_height = house_lines.len();
-            let start_x = cols.saturating_sub(house_width as u16 + 2) as usize;
-            let seaweed_height = 4;
-            let start_y = rows.saturating_sub(house_height as u16 + seaweed_height) as usize;
-
-            for (dy, line) in house_lines.iter().enumerate() {
-                let y = start_y + dy;
-                if y >= lines.len() {
-                    continue;
-                }
-
-                for (dx, ch) in line.chars().enumerate() {
-                    let x = start_x + dx;
-                    if x >= lines[y].spans.len() || y >= lines.len() {
-                        break;
-                    }
-
-                    lines[y].spans[x] =
-                        Span::styled(ch.to_string(), Style::default().fg(Color::Magenta));
-                }
-            }
+            render_kame_house(&mut lines, cols, rows);
 
             let paragraph = Paragraph::new(lines);
             f.render_widget(paragraph, inner);
