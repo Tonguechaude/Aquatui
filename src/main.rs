@@ -14,8 +14,10 @@ use ratatui::{
 use std::{io, thread, time::Duration, time::Instant};
 
 use aquatui::config::*;
-use aquatui::entities::{Fish, Bubble, Seaweed};
-use aquatui::renderer::{draw_seaweed, render_fish, render_bubble, render_seaweed, render_kame_house};
+use aquatui::entities::{Bubble, Fish, Seaweed};
+use aquatui::renderer::{
+    draw_seaweed, render_bubble, render_fish, render_kame_house, render_seaweed,
+};
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let size = terminal.size()?;
@@ -32,6 +34,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                 rng.random_range(1..cols - 1),
                 rng.random_range(1..rows - 1),
                 rng.random_range(0..3),
+                &mut rng,
             )
         })
         .collect();
@@ -45,19 +48,24 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             )
         })
         .collect();
-    
-    // Trier une seule fois au début
+
     bubbles.sort_by_key(|b| b.z_index);
     seaweeds.sort_by_key(|s| s.z_index);
-    
+
     let mut paused = false;
     let mut speed_multiplier = 1.0f64;
-    
+    let mut frame_count = 0usize;
+
     loop {
         terminal.draw(|f| {
             let area = f.area();
             let status = if paused { " [PAUSE]" } else { "" };
-            let title = format!("Aquatui - Speed: {:.1}x{} - [q]uit [SPACE]pause [+/-]speed", speed_multiplier, status);
+            let wave_chars = ["~", "≈", "∼"];
+            let wave_char = wave_chars[(frame_count / 5) % wave_chars.len()];
+            let title = format!(
+                "{} Aquatui {} Speed: {:.1}x{} {} [q]uit [SPACE]pause [+/-]speed [r]eset {}",
+                wave_char, wave_char, speed_multiplier, status, wave_char, wave_char
+            );
             let block = Block::default()
                 .title(title)
                 .borders(Borders::ALL)
@@ -68,30 +76,27 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             let mut lines =
                 vec![Line::from(vec![Span::raw(" "); inner.width as usize]); inner.height as usize];
 
-            // Affichage des poissons (multi-lignes)
             for fish in &fishes {
                 render_fish(&mut lines, fish, inner.width);
             }
 
-            // Bulles
             for bubble in &bubbles {
                 render_bubble(&mut lines, bubble, inner.width);
             }
 
-            // Algues
-            draw_seaweed(&mut lines, cols, rows);
+            draw_seaweed(&mut lines, cols, rows, frame_count);
             for seaweed in &seaweeds {
                 render_seaweed(&mut lines, seaweed, inner.width, inner.height);
             }
 
-            // Kame House
             render_kame_house(&mut lines, cols, rows);
 
             let paragraph = Paragraph::new(lines);
             f.render_widget(paragraph, inner);
         })?;
 
-        let adjusted_duration = Duration::from_millis((FRAME_DURATION_MS as f64 / speed_multiplier) as u64);
+        let adjusted_duration =
+            Duration::from_millis((FRAME_DURATION_MS as f64 / speed_multiplier) as u64);
         if last_frame.elapsed() >= adjusted_duration && !paused {
             fishes = fishes
                 .into_iter()
@@ -107,18 +112,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             while fishes.len() < NUM_FISH {
                 fishes.push(Fish::new(cols - 2, rows - 2, &mut rng));
             }
-            // Mise à jour des bulles
             for bubble in &mut bubbles {
                 bubble.update(rows - 2, cols - 1, &mut rng);
             }
-            // Mise à jours des algues
             for seaweed in &mut seaweeds {
                 seaweed.update();
             }
+            frame_count += 1;
             last_frame = Instant::now();
         }
 
-        // Gestion des touches
         if poll(Duration::from_millis(1))? {
             if let Event::Key(key) = read()? {
                 match key.code {
@@ -140,7 +143,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             }
         }
 
-        // Pause très courte pour éviter 100% CPU
         thread::sleep(Duration::from_millis(SLEEP_DURATION_MS));
     }
 

@@ -1,38 +1,56 @@
+use crate::entities::{Bubble, Fish, Seaweed};
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
 };
-use crate::entities::{Fish, Bubble, Seaweed};
 
 pub const KAME_HOUSE: &str = r#"
-  ____KAME____
- /   HOUSE    \
-/______________\
-| []   __   [] |
-|____|_____|___|
+  ___________
+ /   KAME    \
+/    HOUSE    \
+|  []  __  []  |
+|_____|__|_____|
 "#;
 
-pub fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16) {
+pub fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16, frame_count: usize) {
     let seaweed_height = 4;
-    let seaweed_chars = ["~", "≡", "≡", "~", "≡"];
+    let sand_chars = [".", "·", "°", ".", "·", "°", "˙", ".", "·"];
+    let wave_offset = (frame_count / 3) % sand_chars.len();
+
     for i in 0..seaweed_height {
         let y = rows - 1 - i;
         if y as usize >= lines.len() {
             continue;
         }
 
-        let seaweed_line = seaweed_chars
-            .iter()
-            .map(|&s| s)
-            .cycle()
-            .take(cols as usize)
-            .collect::<String>();
+        let seaweed_line: String = if i == 0 {
+            // Ligne de sable animée
+            (0..cols as usize)
+                .map(|x| {
+                    let char_idx = (x + wave_offset) % sand_chars.len();
+                    sand_chars[char_idx]
+                })
+                .collect()
+        } else {
+            let seaweed_chars = ["~", "≈", "∼", "≋", "~", "≈"];
+            seaweed_chars
+                .iter()
+                .map(|&s| s)
+                .cycle()
+                .take(cols as usize)
+                .collect()
+        };
 
         for (dx, ch) in seaweed_line.chars().enumerate() {
             if dx >= cols as usize || dx >= lines[y as usize].spans.len() {
                 break;
             }
-            lines[y as usize].spans[dx] = Span::styled(ch.to_string(), Style::default().fg(Color::Green));
+            let color = if i == 0 {
+                Color::Yellow // Sable
+            } else {
+                Color::Green // Algues
+            };
+            lines[y as usize].spans[dx] = Span::styled(ch.to_string(), Style::default().fg(color));
         }
     }
 }
@@ -65,13 +83,17 @@ pub fn render_bubble(lines: &mut Vec<Line>, bubble: &Bubble, inner_width: u16) {
         let x_idx = (bubble.x.min(inner_width - 1)) as usize;
         if x_idx < lines[y_idx].spans.len() {
             let symbol = bubble.current_symbol();
-            lines[y_idx].spans[x_idx] =
-                Span::styled(symbol, Style::default().fg(Color::Cyan));
+            lines[y_idx].spans[x_idx] = Span::styled(symbol, Style::default().fg(bubble.color));
         }
     }
 }
 
-pub fn render_seaweed(lines: &mut Vec<Line>, seaweed: &Seaweed, inner_width: u16, inner_height: u16) {
+pub fn render_seaweed(
+    lines: &mut Vec<Line>,
+    seaweed: &Seaweed,
+    inner_width: u16,
+    inner_height: u16,
+) {
     let x = seaweed.x.min(inner_width - 1) as usize;
     let y = seaweed.y.min(inner_height - 1) as usize;
     let symbol = seaweed.current_symbol();
@@ -112,8 +134,12 @@ pub fn render_kame_house(lines: &mut Vec<Line>, cols: u16, rows: u16) {
                 break;
             }
 
-            lines[y].spans[x] =
-                Span::styled(ch.to_string(), Style::default().fg(Color::Magenta));
+            let color = match ch {
+                '[' | ']' => Color::Blue,                // Fenêtres
+                '_' | '|' | '/' | '\\' => Color::Yellow, // Structure
+                _ => Color::Magenta,                     // Texte
+            };
+            lines[y].spans[x] = Span::styled(ch.to_string(), Style::default().fg(color));
         }
     }
 }

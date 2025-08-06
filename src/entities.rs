@@ -1,7 +1,10 @@
-use rand::rngs::ThreadRng;
 use rand::Rng;
+use rand::rngs::ThreadRng;
+use rand::{
+    distr::{Distribution, weighted::WeightedIndex},
+    prelude::IndexedRandom,
+};
 use ratatui::style::Color;
-use rand::{distr::{Distribution, weighted::WeightedIndex}, prelude::IndexedRandom};
 
 #[derive(Clone)]
 pub enum Direction {
@@ -30,6 +33,7 @@ pub struct Bubble {
     pub y: u16,
     pub frame: usize,
     pub z_index: u8,
+    pub color: Color,
 }
 
 pub struct Seaweed {
@@ -38,6 +42,25 @@ pub struct Seaweed {
     pub frame: usize,
     pub z_index: u8,
     pub height: usize,
+}
+
+pub struct Turtle {
+    pub x: u16,
+    pub y: u16,
+    pub body: Vec<String>,
+    pub color: Color,
+    pub speed: u16,
+    pub direction: Direction,
+    pub frame: usize,
+}
+
+pub struct Shark {
+    pub x: u16,
+    pub y: u16,
+    pub body: Vec<String>,
+    pub color: Color,
+    pub speed: u16,
+    pub direction: Direction,
 }
 
 impl Fish {
@@ -148,14 +171,23 @@ __    _\\.---'-.
 }
 
 impl Bubble {
-    const FRAMES: [&'static str; 3] = [".", "o", "0"];
+    const FRAMES: [&'static str; 6] = [".", "·", "o", "°", "O", "0"];
 
-    pub fn new(x: u16, y: u16, z_index: u8) -> Self {
+    pub fn new(x: u16, y: u16, z_index: u8, rng: &mut ThreadRng) -> Self {
+        let color = *[
+            Color::Cyan,
+            Color::LightBlue,
+            Color::White,
+            Color::LightCyan,
+        ]
+        .choose(rng)
+        .unwrap();
         Self {
             x,
             y,
             frame: 0,
             z_index,
+            color,
         }
     }
 
