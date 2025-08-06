@@ -268,7 +268,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
     let mut rng = rand::rng();
-    let frame_duration = Duration::from_millis(FRAME_DURATION_MS);
     let mut last_frame = Instant::now();
 
     let mut fishes: Vec<Fish> = (0..NUM_FISH)
@@ -297,11 +296,17 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     // Trier une seule fois au début
     bubbles.sort_by_key(|b| b.z_index);
     seaweeds.sort_by_key(|s| s.z_index);
+    
+    let mut paused = false;
+    let mut speed_multiplier = 1.0f64;
+    
     loop {
         terminal.draw(|f| {
             let area = f.area();
+            let status = if paused { " [PAUSE]" } else { "" };
+            let title = format!("Aquatui - Speed: {:.1}x{} - [q]uit [SPACE]pause [+/-]speed", speed_multiplier, status);
             let block = Block::default()
-                .title("Aquatui")
+                .title(title)
                 .borders(Borders::ALL)
                 .style(Style::default().fg(Color::White));
             f.render_widget(&block, area);
@@ -398,7 +403,8 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             f.render_widget(paragraph, inner);
         })?;
 
-        if last_frame.elapsed() >= frame_duration {
+        let adjusted_duration = Duration::from_millis((FRAME_DURATION_MS as f64 / speed_multiplier) as u64);
+        if last_frame.elapsed() >= adjusted_duration && !paused {
             fishes = fishes
                 .into_iter()
                 .filter_map(|mut fish| {
@@ -424,11 +430,24 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             last_frame = Instant::now();
         }
 
-        // Gestion de la touche 'q'
+        // Gestion des touches
         if poll(Duration::from_millis(1))? {
             if let Event::Key(key) = read()? {
-                if key.code == KeyCode::Char('q') {
-                    break;
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::Char(' ') => paused = !paused,
+                    KeyCode::Char('+') | KeyCode::Char('=') => {
+                        speed_multiplier = (speed_multiplier + 0.1).min(5.0);
+                    }
+                    KeyCode::Char('-') => {
+                        speed_multiplier = (speed_multiplier - 0.1).max(0.1);
+                    }
+                    KeyCode::Char('r') => {
+                        // Reset speed
+                        speed_multiplier = 1.0;
+                        paused = false;
+                    }
+                    _ => {}
                 }
             }
         }
