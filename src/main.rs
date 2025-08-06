@@ -18,6 +18,12 @@ use ratatui::{
 };
 use std::{io, thread, time::Duration, time::Instant};
 
+const NUM_FISH: usize = 15;
+const NUM_BUBBLES: usize = 40;
+const NUM_SEAWEEDS: usize = 30;
+const FRAME_DURATION_MS: u64 = 100;
+const SLEEP_DURATION_MS: u64 = 5;
+
 #[derive(Clone)]
 enum Direction {
     Left,
@@ -156,10 +162,7 @@ __    _\\.---'-.
         match self.direction {
             Direction::Right => {
                 self.x += self.speed;
-                match self.direction {
-                    Direction::Right => self.x < max_x + 10,
-                    Direction::Left => self.x > 0u16.saturating_sub(10),
-                }
+                self.x < max_x + 10
             }
             Direction::Left => {
                 if self.x <= self.speed {
@@ -252,17 +255,12 @@ fn draw_seaweed(lines: &mut Vec<Line>, cols: u16, rows: u16) {
             .take(cols as usize)
             .collect::<String>();
 
-        let mut content = lines[y as usize].clone();
         for (dx, ch) in seaweed_line.chars().enumerate() {
-            if dx >= cols as usize {
+            if dx >= cols as usize || dx >= lines[y as usize].spans.len() {
                 break;
             }
-            if dx < content.spans.len() {
-                content.spans[dx] = Span::styled(ch.to_string(), Style::default().fg(Color::Green));
-            }
+            lines[y as usize].spans[dx] = Span::styled(ch.to_string(), Style::default().fg(Color::Green));
         }
-
-        lines[y as usize] = content;
     }
 }
 
@@ -270,14 +268,13 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
     let size = terminal.size()?;
     let (cols, rows) = (size.width, size.height);
     let mut rng = rand::rng();
-    let frame_duration = Duration::from_millis(100);
+    let frame_duration = Duration::from_millis(FRAME_DURATION_MS);
     let mut last_frame = Instant::now();
 
-    let num_fish = 15;
-    let mut fishes: Vec<Fish> = (0..num_fish)
+    let mut fishes: Vec<Fish> = (0..NUM_FISH)
         .map(|_| Fish::new(cols - 2, rows - 2, &mut rng))
         .collect();
-    let mut bubbles: Vec<Bubble> = (0..40)
+    let mut bubbles: Vec<Bubble> = (0..NUM_BUBBLES)
         .map(|_| {
             Bubble::new(
                 rng.random_range(1..cols - 1),
@@ -286,7 +283,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             )
         })
         .collect();
-    let mut seaweeds: Vec<Seaweed> = (0..30)
+    let mut seaweeds: Vec<Seaweed> = (0..NUM_SEAWEEDS)
         .map(|_| {
             Seaweed::new(
                 rng.random_range(1..cols - 1),
@@ -296,6 +293,10 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
             )
         })
         .collect();
+    
+    // Trier une seule fois au début
+    bubbles.sort_by_key(|b| b.z_index);
+    seaweeds.sort_by_key(|s| s.z_index);
     loop {
         terminal.draw(|f| {
             let area = f.area();
@@ -322,27 +323,31 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     for (i, ch) in chars.into_iter().enumerate() {
                         let screen_x = start_x + i as i16;
                         if screen_x >= 0 && (screen_x as u16) < inner.width {
-                            lines[y].spans[screen_x as usize] =
-                                Span::styled(ch.to_string(), Style::default().fg(fish.color));
+                            let x_idx = screen_x as usize;
+                            if x_idx < lines[y].spans.len() {
+                                lines[y].spans[x_idx] =
+                                    Span::styled(ch.to_string(), Style::default().fg(fish.color));
+                            }
                         }
                     }
                 }
             }
 
             // Bulles
-            bubbles.sort_by_key(|b| b.z_index);
             for bubble in &bubbles {
-                if (bubble.y as usize) < lines.len() {
-                    let x = bubble.x.min(inner.width - 1) as usize;
-                    let symbol = bubble.current_symbol();
-                    lines[bubble.y as usize].spans[x] =
-                        Span::styled(symbol, Style::default().fg(Color::Cyan));
+                let y_idx = bubble.y as usize;
+                if y_idx < lines.len() {
+                    let x_idx = (bubble.x.min(inner.width - 1)) as usize;
+                    if x_idx < lines[y_idx].spans.len() {
+                        let symbol = bubble.current_symbol();
+                        lines[y_idx].spans[x_idx] =
+                            Span::styled(symbol, Style::default().fg(Color::Cyan));
+                    }
                 }
             }
 
             // Algues
             draw_seaweed(&mut lines, cols, rows);
-            seaweeds.sort_by_key(|s| s.z_index);
             for seaweed in &seaweeds {
                 let x = seaweed.x.min(inner.width - 1) as usize;
                 let y = seaweed.y.min(inner.height - 1) as usize;
@@ -355,7 +360,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                     }
                     for (dx, char) in line.chars().enumerate() {
                         let draw_x = x + dx;
-                        if draw_x >= lines[draw_y].spans.len() {
+                        if draw_x >= lines[draw_y].spans.len() || draw_y >= lines.len() {
                             continue;
                         }
                         lines[draw_y].spans[draw_x] =
@@ -380,7 +385,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
 
                 for (dx, ch) in line.chars().enumerate() {
                     let x = start_x + dx;
-                    if x >= lines[y].spans.len() {
+                    if x >= lines[y].spans.len() || y >= lines.len() {
                         break;
                     }
 
@@ -405,7 +410,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
                 })
                 .collect();
 
-            while fishes.len() < num_fish {
+            while fishes.len() < NUM_FISH {
                 fishes.push(Fish::new(cols - 2, rows - 2, &mut rng));
             }
             // Mise à jour des bulles
@@ -429,7 +434,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> io::Resu
         }
 
         // Pause très courte pour éviter 100% CPU
-        thread::sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(SLEEP_DURATION_MS));
     }
 
     Ok(())
