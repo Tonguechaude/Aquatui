@@ -8,7 +8,6 @@ ratatui = "0.29"
 crossterm = "0.29"
 rand = "0.9.1"
 
-
 [profile.release]
 opt-level = 3     # Maximum optimization
 lto = true        # Link Time Optimization

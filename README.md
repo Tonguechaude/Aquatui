@@ -25,3 +25,7 @@ Pour développer ce projet, vous pouvez utiliser les commandes suivantes :
 ```bash
 cargo build --release
 ```
+
+## Credits
+
+Thanks to The Kat for the openbsd blowfish [link to the post](https://www.asciiart.eu/animals/fish)
